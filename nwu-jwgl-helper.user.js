@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         教务系统助手 (成绩导出 & 重修查询)
-// @namespace    ikaikail@ikaikail.com
+// @namespace    https://github.com/wzp100/nwu-jwgl-helper
 // @version      2.2
 // @description  在方正/西北大学教务系统页面添加一个统一的助手按钮，提供成绩导出(支持全部学年)和重修查询功能。
-// @author       iKaiKail & Gemini AI & tianji
+// @author       tianji
 // @match        *://*/jwglxt/cjcx/*
 // @match        https://jwgl.nwu.edu.cn/jwglxt/xtgl/index_initMenu.html*
 // @match        https://jwgl.nwu.edu.cn/jwglxt/cxbm/cxbm_cxXscxbmIndex.html*
