@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         教务系统助手 (成绩导出 & 重修查询)
 // @namespace    https://github.com/wzp100/nwu-jwgl-helper
-// @version      2.4
+// @version      2.5
 // @description  在方正/西北大学教务系统页面添加一个统一的助手按钮。在主页提供功能选择，并内置成绩导出(支持全部学年)和重修查询功能。
 // @author       tianji (Modified by Gemini)
 // @match        *://*/jwglxt/cjcx/*
@@ -40,11 +40,11 @@
             GM_addStyle(`
                 #assistant-btn {
                     position: fixed; top: 10px; right: 150px; z-index: 9998;
-                    padding: 8px 15px; background-color: #007bff; color: white;
+                    padding: 8px 15px; background-color: #28a745; color: white;
                     border: none; border-radius: 5px; cursor: pointer; font-size: 14px;
                     box-shadow: 0 2px 5px rgba(0,0,0,0.2);
                 }
-                #assistant-btn:hover { background-color: #0056b3; }
+                #assistant-btn:hover { background-color: #218838; }
                 #assistant-modal {
                     position: fixed; top: 50%; left: 50%;
                     transform: translate(-50%, -50%);
@@ -59,19 +59,24 @@
                     display: flex; justify-content: space-between; align-items: center;
                 }
                 .assistant-header h2 { margin: 0; font-size: 18px; }
-                .assistant-close-btn {
-                    padding: 5px 10px; background-color: #e0e0e0;
-                    border: 1px solid #ccc; cursor: pointer;
+                .header-buttons { display: flex; align-items: center; gap: 10px; }
+                .assistant-close-btn, .header-back-btn {
+                    padding: 5px 10px; border-radius: 4px; cursor: pointer;
                 }
+                .assistant-close-btn { background-color: #e0e0e0; border: 1px solid #ccc; }
+                .header-back-btn { background-color: #6c757d; color: white; border: 1px solid #5a6268; }
+                .header-back-btn:hover { background-color: #5a6268; }
+
                 .assistant-content { padding: 20px; overflow-y: auto; flex-grow: 1; }
                 /* 功能选择菜单按钮样式 */
                 .function-select-container { display: flex; flex-direction: column; gap: 15px; align-items: center; padding: 20px 0; }
                 .function-select-btn {
                     width: 60%; padding: 15px; font-size: 16px; border-radius: 8px;
-                    border: 1px solid #ddd; background-color: #f0f0f0; cursor: pointer;
+                    border: none; background-color: #28a745; color: white; cursor: pointer;
                     text-align: center; transition: all 0.2s ease;
                 }
-                .function-select-btn:hover { background-color: #e0e0e0; border-color: #ccc; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+                .function-select-btn:hover { background-color: #218838; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+                /* 查询控制区域统一样式 */
                 .query-controls {
                     padding: 15px; display: flex; align-items: center; gap: 15px;
                     border-bottom: 1px solid #eee; margin-bottom: 15px;
@@ -82,11 +87,19 @@
                 }
                 .query-controls button { background-color: #28a745; color: white; cursor: pointer; }
                 .query-controls button:hover { background-color: #218838; }
-                .result-table { width: 100%; border-collapse: collapse; }
+                /* 结果表格样式 */
+                .result-table { width: 100%; border-collapse: collapse; table-layout: auto; }
                 .result-table th, .result-table td { border: 1px solid #ddd; padding: 8px; text-align: center; }
                 .result-table th { background-color: #f2f2f2; position: relative; }
                 .sortable-header { cursor: pointer; user-select: none; }
                 .sortable-header:hover { background-color: #e0e0e0; }
+                /* [新增] 为课程名称列（第2列）设置换行和左对齐 */
+                .result-table td:nth-child(2) {
+                    word-wrap: break-word;
+                    word-break: break-all;
+                    text-align: left;
+                    padding-left: 10px;
+                }
                 .sortable-header::after {
                     content: ''; display: inline-block; margin-left: 5px; opacity: 0.5;
                     width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent;
@@ -94,7 +107,7 @@
                 .sort-asc::after { border-bottom: 5px solid #333; opacity: 1; }
                 .sort-desc::after { border-top: 5px solid #333; opacity: 1; }
                 #loading-spinner {
-                     border: 5px solid #f3f3f3; border-top: 5px solid #3498db;
+                     border: 5px solid #f3f3f3; border-top: 5px solid #28a745;
                      border-radius: 50%; width: 40px; height: 40px;
                      animation: spin 1s linear infinite; margin: 20px auto;
                 }
@@ -110,7 +123,9 @@
                 <div id="assistant-modal">
                     <div class="assistant-header">
                         <h2 id="assistant-modal-title">教务助手</h2>
-                        <button class="assistant-close-btn">关闭</button>
+                        <div class="header-buttons">
+                            <button class="assistant-close-btn">关闭</button>
+                        </div>
                     </div>
                     <div id="assistant-modal-content" class="assistant-content"></div>
                 </div>`;
@@ -126,13 +141,24 @@
         // --- 打开和关闭模态窗口 ---
         openModal: () => {
             assistant.elements.modal.css('display', 'flex');
-            // 打开时立即判断路由
             assistant.route();
         },
         closeModal: () => assistant.elements.modal.css('display', 'none'),
 
-        // --- [新增] 主功能选择菜单 ---
+        // --- 动态控制返回按钮 ---
+        toggleBackButton: (show) => {
+            const container = $('.header-buttons');
+            container.find('.header-back-btn').remove();
+            if (show) {
+                const backBtn = $('<button>', { text: '返回', class: 'header-back-btn' });
+                backBtn.on('click', assistant.showMainMenu);
+                container.prepend(backBtn);
+            }
+        },
+
+        // --- 主功能选择菜单 ---
         showMainMenu: () => {
+            assistant.toggleBackButton(false);
             const content = `
                 <div class="function-select-container">
                     <p>请选择您需要使用的功能：</p>
@@ -145,7 +171,6 @@
                 $('#select-retake-query').on('click', retakeQuerier.configureModal);
             });
         },
-
 
         /**
          * 动态填充模态窗口内容
@@ -171,9 +196,8 @@
                         yearSelect.append(new Option(`${year}-${year + 1}学年`, year));
                     }
                     if (addAllYearsOption) {
-                        yearSelect.val(''); // 成绩导出默认选“全部学年”
+                        yearSelect.val('');
                     } else {
-                        // 重修查询默认选当前学年（秋季学期）或上一学年（春季学期）
                         const defaultYear = (new Date().getMonth() < 8) ? currentYear - 1 : currentYear;
                         yearSelect.val(defaultYear);
                     }
@@ -199,19 +223,15 @@
         // --- 路由与初始化 ---
         route: () => {
             const currentUrl = window.location.href;
-            // 如果在成绩查询页面，直接显示成绩导出功能
             if (/\/jwglxt\/cjcx\//.test(currentUrl)) {
                 gradeExporter.configureModal();
-            }
-            // 否则，显示主选择菜单
-            else {
+            } else {
                 assistant.showMainMenu();
             }
         },
 
         init: () => {
             assistant.setupUI();
-            // 移除这里的点击事件，将其移至 openModal 中，确保每次打开都重新路由
         }
     };
 
@@ -222,6 +242,7 @@
 
     const gradeExporter = {
         configureModal: () => {
+            assistant.toggleBackButton(true);
             const content = `
                 <div class="query-controls">
                     <label for="grade-year-select">学年:</label>
@@ -235,7 +256,6 @@
                     <button id="start-export-btn">开始导出</button>
                 </div>
                 <div id="export-status" style="text-align:center; color:#888;">请选择学年学期后点击导出。</div>`;
-            // 调用 populateModal 时，addAllYearsOption 参数传 true，以添加“全部学年”
             assistant.populateModal('成绩分项导出', content, () => {
                 $('#start-export-btn').on('click', gradeExporter.handleExport);
             }, true);
@@ -288,7 +308,9 @@
 
     const retakeQuerier = {
         currentCourseData: [],
+        sortState: { key: 'cj', direction: 'asc' }, // 默认按成绩升序
         configureModal: () => {
+            assistant.toggleBackButton(true);
             const content = `
                 <div class="query-controls">
                     <label for="retake-year-select">学年:</label>
@@ -300,7 +322,6 @@
                     <button id="start-query-btn">开始查询</button>
                 </div>
                 <div id="retake-result-content"><p style="text-align:center; color:#888;">请选择学年和学期后点击查询。</p></div>`;
-            // 调用 populateModal 时，addAllYearsOption 参数为 false，不添加“全部学年”
             assistant.populateModal('重修课程查询', content, () => {
                 if (!assistant.getStudentId()) {
                     $('#retake-result-content').html('<p style="color:red; text-align:center;">错误：无法自动获取到您的学号！</p>');
@@ -331,7 +352,10 @@
                         responseJson.items.forEach(item => { if (item.cj && !allCourses.some(c => c.kch_id === item.kch_id && c.kcmc === item.kcmc)) { allCourses.push(item); } });
                     }
                 });
+                // 设置初始排序状态并排序
+                retakeQuerier.sortState = { key: 'cj', direction: 'asc' };
                 allCourses.sort((a, b) => parseFloat(a.cj) - parseFloat(b.cj));
+
                 retakeQuerier.currentCourseData = allCourses;
                 retakeQuerier.displayResults();
             } catch (error) {
@@ -358,24 +382,32 @@
                 });
             });
         },
-        sortTable: (sortKey, headerCell) => {
-            const currentSortDir = headerCell.dataset.sortDir || 'desc';
-            const newSortDir = currentSortDir === 'asc' ? 'desc' : 'asc';
+        sortTable: (newSortKey) => {
+            // 如果点击的是当前排序列，则切换排序方向；否则默认升序
+            if (retakeQuerier.sortState.key === newSortKey) {
+                retakeQuerier.sortState.direction = retakeQuerier.sortState.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                retakeQuerier.sortState.key = newSortKey;
+                retakeQuerier.sortState.direction = 'asc';
+            }
+
+            // 根据新的排序状态对数据进行排序
             retakeQuerier.currentCourseData.sort((a, b) => {
+                const sortKey = retakeQuerier.sortState.key;
+                const sortDir = retakeQuerier.sortState.direction;
                 let valA = a[sortKey], valB = b[sortKey];
+
                 if (['cj', 'xf', 'cxcj'].includes(sortKey)) {
-                    valA = parseFloat(valA) || -1; valB = parseFloat(valB) || -1;
-                    return newSortDir === 'asc' ? valA - valB : valB - valA;
+                    valA = parseFloat(valA) || -1;
+                    valB = parseFloat(valB) || -1;
+                    return sortDir === 'asc' ? valA - valB : valB - valA;
                 } else {
-                    valA = (valA || '').toString(); valB = (valB || '').toString();
-                    return newSortDir === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+                    valA = (valA || '').toString();
+                    valB = (valB || '').toString();
+                    return sortDir === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
                 }
             });
-            $('#retake-result-content .sortable-header').each((i, th) => {
-                th.dataset.sortDir = ''; $(th).removeClass('sort-asc sort-desc');
-            });
-            headerCell.dataset.sortDir = newSortDir;
-            $(headerCell).addClass(newSortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+
             retakeQuerier.displayResults();
         },
         displayResults: () => {
@@ -390,8 +422,17 @@
             });
             tableHTML += '</tbody></table>';
             resultContent.html(tableHTML);
+
+            // 根据当前的排序状态，给对应的表头添加排序指示样式
+            const sortedHeader = resultContent.find(`.sortable-header[data-sort-key="${retakeQuerier.sortState.key}"]`);
+            if(sortedHeader.length) {
+                const sortClass = retakeQuerier.sortState.direction === 'asc' ? 'sort-asc' : 'sort-desc';
+                sortedHeader.addClass(sortClass);
+            }
+
+            // 为可排序的表头重新绑定点击事件
             resultContent.find('.sortable-header').each((i, header) => {
-                $(header).on('click', () => retakeQuerier.sortTable(header.dataset.sortKey, header));
+                $(header).on('click', () => retakeQuerier.sortTable(header.dataset.sortKey));
             });
         }
     };
