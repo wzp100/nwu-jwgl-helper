@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         教务系统助手 (成绩导出 & 构成查询 & 重修查询 & 成绩汇总)
 // @namespace    https://github.com/wzp100/nwu-jwgl-helper
-// @version      3.1 Beta
+// @version      3.1.0-beta
 // @description  在方正/西北大学教务系统页面添加一个统一的助手按钮。内置成绩分项导出、课程成绩构成查询(支持排序)和重修课程查询等功能，并支持汇总查询。
 // @author       wzp100 (Gemini 辅助) xumoe-c (维护成绩汇总模块)
 // @match        https://jwgl.nwu.edu.cn/jwglxt/*
