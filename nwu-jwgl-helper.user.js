@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         教务系统助手 (成绩导出 & 构成查询 & 重修查询)
+// @name         教务系统助手 (成绩导出 & 构成查询 & 重修查询 & 成绩汇总)
 // @namespace    https://github.com/wzp100/nwu-jwgl-helper
-// @version      3.0
-// @description  在方正/西北大学教务系统页面添加一个统一的助手按钮。内置成绩分项导出、课程成绩构成查询(支持排序)和重修课程查询等功能。
-// @author       wzp100 (Gemini 辅助)
+// @version      3.1 Beta
+// @description  在方正/西北大学教务系统页面添加一个统一的助手按钮。内置成绩分项导出、课程成绩构成查询(支持排序)和重修课程查询等功能，并支持汇总查询。
+// @author       wzp100 (Gemini 辅助) xumoe-c (维护成绩汇总模块)
 // @match        https://jwgl.nwu.edu.cn/jwglxt/*
 // @match        *://*/jwglxt/*
 // @icon         https://www.zfsoft.com/img/zf.ico
@@ -183,6 +183,7 @@
                         <li><strong>课程成绩构成查询：</strong> 以清晰的表格形式展示每门课程的详细成绩组成（如平时、期中、实验等），并支持全列点击排序。</li>
                         <li><strong>学期成绩导出：</strong> 一键导出指定学年学期或全部学年的成绩单为 Excel (XLS) 文件。</li>
                         <li><strong>重修查询：</strong> 快速查询指定学年需要重修或补考的课程列表。</li>
+                        <li><strong>成绩汇总（实验性功能）：</strong> 仍在开发中，结果仅供参考。可汇总成绩分项、总评成绩、重修成绩，并可根据占比计算期末成绩。</li>
                     </ul>
                     <hr style="margin: 20px 0;">
                     <p><strong>项目地址：</strong></p>
@@ -191,8 +192,8 @@
                         <a href="https://github.com/wzp100/nwu-jwgl-helper" target="_blank">https://github.com/wzp100/nwu-jwgl-helper</a>
                     </p>
                      <p style="margin-top: 30px; text-align: right; color: #888;">
-                        作者: wzp100<br>
-                        AI 辅助: Gemini
+                        作者: wzp100 xumoe-c<br>
+                        AI 辅助: Gemini、Claude
                     </p>
                 </div>
             `;
@@ -584,6 +585,167 @@
             });
         }
     };
+
+    /* ================================================================================= */
+    /* =================== 功能四: 成绩汇总（实验性功能） ================== */
+    /* ================================================================================= */
+    
+    // 成绩汇总功能实现
+    const gradeIntegrator = {
+        // 存储查询到的成绩构成和重修数据
+        componentData: [],
+        retakeData: [],
+        dynamicHeaders: [],
+        // 配置弹窗
+        configureModal: function () {
+            assistant.toggleBackButton(true);
+            const content = `
+                <div class="query-controls">
+                    <label for="gi-year-select">学年:</label>
+                    <select id="gi-year-select" class="year-select"></select>
+                    <label for="gi-semester-select">学期:</label>
+                    <select id="gi-semester-select">
+                        <option value="">全部</option>
+                        <option value="3">第一学期</option>
+                        <option value="12">第二学期</option>
+                    </select>
+                    <button id="start-gi-query-btn">查询汇总</button>
+                </div>
+                <div id="gi-result-content"><p style="text-align:center; color:#888;">请选择学年和学期后点击查询。</p></div>
+            `;
+            assistant.populateModal('成绩汇总（实验性功能，结果仅供参考。后续更新将加入期末成绩计算、分项成绩占比展示等功能。）', content, () => {
+                $('#start-gi-query-btn').on('click', gradeIntegrator.executeQuery);
+            }, true);
+        },
+        // 执行查询
+        executeQuery: async function () {
+            const year = $('#gi-year-select').val();
+            const semester = $('#gi-semester-select').val();
+            const resultContent = $('#gi-result-content');
+            resultContent.html('<div id="loading-spinner"></div><p style="text-align:center;">正在查询中...</p>');
+    
+            try {
+                // 1. 查询成绩构成（功能一）
+                const compJson = await gradeComponentQuerier.fetchGradeComponentData(year, semester);
+                // 2. 查询重修成绩（功能三）
+                const studentId = assistant.getStudentId();
+                let retakeJsonArr = [];
+                if (semester === "") {
+                    retakeJsonArr = await Promise.all([
+                        retakeQuerier.fetchRetakeData(studentId, year, "3"),
+                        retakeQuerier.fetchRetakeData(studentId, year, "12")
+                    ]);
+                } else {
+                    retakeJsonArr = [await retakeQuerier.fetchRetakeData(studentId, year, semester)];
+                }
+                // 整理重修数据
+                let retakeItems = [];
+                retakeJsonArr.forEach(json => {
+                    if (json && json.items) {
+                        json.items.forEach(item => {
+                            if (item.kcmc && item.cj) {
+                                retakeItems.push({
+                                    kcmc: item.kcmc ? item.kcmc.split('<br>')[0] : '',
+                                    cj: item.cj,
+                                    cxcj: item.cxcj || ''
+                                });
+                            }
+                        });
+                    }
+                });
+    
+                // 整理成绩构成数据
+                if (!compJson || !compJson.items || compJson.items.length === 0) {
+                    resultContent.html('<p style="text-align:center; color: green;">查询完成，未找到相关成绩数据。</p>');
+                    return;
+                }
+                // 复用功能一的处理逻辑
+                const componentHeaders = new Set();
+                compJson.items.forEach(item => { if (item.xmblmc) componentHeaders.add(item.xmblmc); });
+                gradeIntegrator.dynamicHeaders = Array.from(componentHeaders).sort();
+    
+                // 以课程名称为key聚合
+                const courses = {};
+                compJson.items.forEach(item => {
+                    const key = item.kcmc;
+                    if (!courses[key]) {
+                        courses[key] = {
+                            kcmc: item.kcmc,
+                            kch: item.kch,
+                            xnmc: item.xnmc,
+                            xqmc: item.xqmc === '3' ? '第一学期' : (item.xqmc === '12' ? '第二学期' : `第${item.xqmc}学期`),
+                            components: {}
+                        };
+                    }
+                    courses[key].components[item.xmblmc] = item.xmcj;
+                });
+    
+                // 合并重修成绩
+                Object.values(courses).forEach(course => {
+                    const retake = retakeItems.find(r => r.kcmc === course.kcmc);
+                    course.cj = retake ? retake.cj : '';
+                    course.cxcj = retake ? retake.cxcj : '';
+                });
+    
+                gradeIntegrator.componentData = Object.values(courses);
+                gradeIntegrator.renderTable();
+            } catch (error) {
+                console.error('成绩汇总查询出错:', error);
+                resultContent.html(`<p style="color:red; text-align:center;">查询失败，请检查网络或查看浏览器控制台(F12)的错误信息。</p>`);
+            }
+        },
+        // 渲染表格
+        renderTable: function () {
+            const fixedHeaders = { 'kcmc': '课程名称', 'kch': '课程代码', 'xnmc': '学年', 'xqmc': '学期' };
+            let tableHTML = `<table class="result-table"><thead><tr><th>序号</th>`;
+            // 固定表头
+            for (const key in fixedHeaders) {
+                tableHTML += `<th>${fixedHeaders[key]}</th>`;
+            }
+            // 动态成绩分项表头
+            gradeIntegrator.dynamicHeaders.forEach(header => {
+                tableHTML += `<th>${header}</th>`;
+            });
+            // 重修成绩表头
+            tableHTML += `<th>原始成绩</th><th>重修成绩</th>`;
+            tableHTML += `</tr></thead><tbody>`;
+    
+            gradeIntegrator.componentData.forEach((course, index) => {
+                tableHTML += `<tr>
+                    <td>${index + 1}</td>
+                    <td class="col-course-name">${course.kcmc}</td>
+                    <td>${course.kch}</td>
+                    <td>${course.xnmc}</td>
+                    <td>${course.xqmc}</td>`;
+                gradeIntegrator.dynamicHeaders.forEach(header => {
+                    const score = course.components[header] || '—';
+                    tableHTML += `<td>${score}</td>`;
+                });
+                tableHTML += `<td style="color: red; font-weight: bold;">${course.cj || '—'}</td><td>${course.cxcj || '—'}</td>`;
+                tableHTML += `</tr>`;
+            });
+            tableHTML += '</tbody></table>';
+    
+            $('#gi-result-content').html(tableHTML);
+        }
+    };
+    
+    // 修正按钮调用
+    window.gradeIntigrater = gradeIntegrator;
+    
+    // 在主菜单添加入口
+    const oldShowMainMenu = assistant.showMainMenu;
+    assistant.showMainMenu = function() {
+        oldShowMainMenu();
+        // 动态插入按钮
+        setTimeout(() => {
+            if ($('#select-grade-integrate').length === 0) {
+                $('<button id="select-grade-integrate" class="function-select-btn" style="background-color:#007bff;">成绩汇总（实验性功能，结果仅供参考）</button>')
+                    .insertBefore('#select-about')
+                    .on('click', gradeIntigrater.configureModal);
+            }
+        }, 0);
+    }
 
     // --- 启动脚本 ---
     $(document).ready(assistant.init);
